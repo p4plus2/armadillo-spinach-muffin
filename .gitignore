@@ -1,0 +1,11 @@
+*.s
+demos/test_code.asm
+*.sfc
+*.trace
+*.log
+*.lsmv
+*.o
+*.pcm
+*.txt
+# current binary name...will probably change
+csnes
