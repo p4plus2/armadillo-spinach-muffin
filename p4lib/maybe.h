@@ -4,10 +4,11 @@
 #include <new>
 
 struct nothing_t{};
-static nothing_t nothing;
+static nothing_t nothing = nothing;
 
 template <class T>
 class maybe{
+	static_assert(!is_same_v<T, bool>, "maybe doesn't support bool, use a tristate");
 	public:
 		maybe(){}
 		maybe(nothing_t){}
@@ -58,7 +59,18 @@ class maybe{
 			return assign(move(source));
 		}
 		
-		bool valid()
+		constexpr explicit operator bool() const 
+		{
+			return valid_;
+		}
+		
+		constexpr operator T() const
+		{
+			assert(valid_);
+			return value_;
+		}
+		
+		bool is_valid()
 		{
 			return valid_;
 		}
@@ -107,8 +119,10 @@ class maybe{
 				return *this;
 			}
 			reset();
-			valid_ = true; 
-			new(&value_) T(forward<T>(source)); 
+			valid_ = source.valid_; 
+			if(valid_){
+				new(&value_) T(forward<T>(source)); 
+			}
 			return *this;
 		}
 		
@@ -125,6 +139,7 @@ class maybe{
 
 template<typename T>
 class maybe<T&>{
+	static_assert(!is_same_v<T, bool>, "maybe doesn't support bool, use a tristate");
 	public:
 		maybe() : value_(nullptr) {}
 		maybe(nothing_t) : value_(nullptr) {}

@@ -15,9 +15,7 @@ snes_line get_width_directive(asm_register_width width)
 	snes_line line;
 	line.type = DIRECTIVE;
 	line.directive() = ".width";
-	line.create_operand();
-	auto &operand = line.operand(0);
-	operand.width = width;
+	line.create_operand().width = width;
 	return line;
 }
 
@@ -44,8 +42,7 @@ template <typename T>
 snes_operand &add_operand(snes_line &line, asm_operand_type type, T value)
 {
 	int operand = line.operands.length();
-	line.create_operand();
-	line.operand(operand).type = type;
+	line.create_operand().type = type;
 	
 	if constexpr(is_integral_v<T>){
 		line.operand(operand).value = value;

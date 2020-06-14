@@ -16,20 +16,68 @@ inline constexpr int bit_round(int v)
 	return v;
 }
 
-inline constexpr int min(int a, int b)
+namespace detail{
+	template <typename T1>
+	constexpr auto get_first_element(T1 source)
+	{
+		static_assert(is_base_of_v<iterable, T1> || is_bounded_array_v<T1>);
+		if constexpr(is_base_of_v<iterable, T1>){
+			return *source.begin();
+		}else{
+			return *source;
+		}
+	}
+	
+	template <typename T1, typename T2>
+	auto single_select(T1 source, T2 comparator)
+	{
+		auto result = get_first_element(source);
+	
+		for(const auto &i : source){
+			result = comparator(i, result);
+		}
+		
+		return result;
+	}
+};
+
+
+template <typename T>
+inline constexpr T min(T a, T b)
 {
 	return a > b ? b : a;
 }
 
-inline constexpr int max(int a, int b)
+template <typename T>
+inline constexpr T max(T a, T b)
 {
 	return a < b ? b : a;
 }
 
-inline constexpr int clamp(int value, int a, int b)
+template <typename T>
+inline constexpr T clamp(T value, T a, T b)
 {
 	return min(max(value, a), b);
 }
+
+template <typename T1>
+auto min(const T1 &source)
+{
+	static_assert(is_base_of_v<iterable, T1> || is_bounded_array_v<T1>);
+	using element = decltype(detail::get_first_element(source));
+	
+	return detail::single_select(source, [](element a, element b){ return min(a, b); });
+}
+
+template <typename T1>
+auto max(const T1 &source)
+{
+	static_assert(is_base_of_v<iterable, T1> || is_bounded_array_v<T1>);
+	using element = decltype(detail::get_first_element(source));
+	
+	return detail::single_select(source, [](element a, element b){ return max(a, b); });
+}
+
 
 template <typename T>
 T *copy(const T *source, int copy_length, T *dest)
@@ -74,8 +122,23 @@ T *move(T *source, int copy_length, T *dest)
 }
 
 
-//template<typename T> using has_to_string = decltype(declval<T&>().to_string());
-//constexpr(is_detected_exact_v<string, has_to_string, T>)
+template <typename T1, typename T2>
+T1 blacklist_copy(const T1 &source, const T2 &skips, int offset, int bound){
+	static_assert(is_base_of_v<container, T1>);
+	static_assert(is_base_of_v<iterable, T2>);
+	T1 slice;
+	for(const auto &i : skips){
+		if(i < offset){
+			continue;
+		}else if(i < bound){
+			slice.append(source.slice(offset, i));
+			offset = i + 1;				
+		}else{
+			break;
+		}
+	}
+	return slice.append(source.slice(offset, bound));
+};
 
 template <typename T, typename C>
 T *sort(T *data, int size, const C &comparator)
@@ -98,7 +161,7 @@ T *sort(T *data, int size, const C &comparator)
 		}
 	}
 
-	uint pivot = size / 2;
+	int pivot = size / 2;
 	sort(data, pivot, comparator);
 	sort(data + pivot, size - pivot, comparator);
 
@@ -147,4 +210,28 @@ template <typename T>
 T &sort(T &target)
 {
 	return sort(target, [](auto a, auto b){ return a < b; });
+}
+
+//offset only has a meaning for integer type evictees
+//as there is no consistent value if say offset was applied to a hash array
+template <typename T1, typename T2>
+T1 &evict(T1 &target, int offset, const T2 &evictees)
+{
+	static_assert(is_base_of_v<container, T1>);
+	static_assert(is_base_of_v<iterable, T2>);
+	
+	for(int count = 0; const auto &i : evictees){
+		if constexpr(is_integral_v<decay<decltype(i)>::type>){
+			target.remove(i - offset - count);
+		}else{
+			target.remove(i);
+		}
+		count++;
+	}
+}
+
+template <typename T1, typename T2>
+T1 &evict(T1 &target, const T2 &evictees)
+{
+	return evict(target, 0, evictees);
 }

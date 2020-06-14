@@ -10,6 +10,10 @@
 #include "instructions.h"
 #include "x86_instructions.h"
 #include "snes_instructions.h"
+#include "optimization.h"
+
+
+asm_register_width output_snes_line(const snes_line &line, asm_register_width previous_width = BITS_NONE);
 
 
 array<char> load_file(const char *file_name)
@@ -348,8 +352,7 @@ snes_line translate_directive(const x86_line &line)
 	translated.type = DIRECTIVE;
 	translated.directive() = "db";
 	
-	translated.create_operand();
-	auto &operand = translated.operand(0);
+	auto &operand = translated.create_operand();
 	operand.text = line.operand(0).text;
 	operand.type = CONSTANT;
 	return translated;
@@ -447,6 +450,7 @@ pair<array<int>, array<int>> get_branch_pairs(const array<snes_line> &lines)
 					branches.append(i);
 				}
 			break;
+			default:;
 		}
 		i++;
 	}
@@ -551,231 +555,6 @@ void correct_branches(array<snes_line> &lines, array<int> &invalid_branches)
 	}
 }
 
-int find_register_store(int start, unsigned int value, const array<snes_line> &lines)
-{
-	auto sta_comparator = [](const snes_line &line){
-		return line.matches(INSTRUCTION, 1, "sta");
-	};		
-	
-	int i = lines.fuzzy_find(i, sta_comparator);
-	
-	while(i != -1){
-		if(lines[i].operand(0).matches(MEMORY, DIRECT, value)){
-			break;
-		}
-		i = lines.fuzzy_find(i+1, sta_comparator);
-	}
-	if(i == -1){
-		i = lines.length();
-	}
-	return i;
-}
-
-//this was the first optimizer and could probably use a rewrite
-array<snes_line> redundant_load_store_optimize(const array<snes_line> &lines)
-{
-	//this optimization looks for dp and optimizes redundant loads and stores to it
-	array<snes_line> optimized;
-	array<int> skip;
-	for(int i = 0; i < lines.length()-1; i++){
-		if(lines[i].matches(INSTRUCTION, 1, "sta") && lines[i+1].matches(DIRECTIVE, 1, ".width")
-		&& lines[i+2].matches(INSTRUCTION, 1, "lda")  && lines[i].operand(0).mode == DIRECT
-		&& lines[i].operand(0).value == lines[i+2].operand(0).value && lines[i].operand(0).value < 0x100){
-			array<int> potential_skip;
-			
-			auto instruction_comparator = [](const snes_line &line){
-				return line.matches(INSTRUCTION, 1);
-			};
-			
-			int j = find_register_store(i + 2, lines[i].operand(0).value, lines);
-			
-			//this could need improvements if the assembler starts emiting more single operand ops
-			//that modify the accumulator
-			int k = lines.fuzzy_find(i+2, j-1, instruction_comparator);
-			bool can_skip = true;
-			bool found_use = false;
-			while(k != -1){
-				if(lines[k].operand(0).matches(MEMORY, lines[i].operand(0).value)){
-					if(found_use){
-						can_skip = false;
-						break;
-					}
-					if(lines[k].mnemonic() == "lda" && lines[k].operand(0).mode == DIRECT){
-						potential_skip.append(k);
-					}
-				}else if(!(lines[k].mnemonic().starts_with("st"))){ //fine tune in future
-					found_use = true;
-				}
-				k = lines.fuzzy_find(k+1, j-1, instruction_comparator);
-			}
-			
-			if(can_skip){
-				skip.append(potential_skip);
-			}else{
-				optimized += lines[i];	//store will be needed still
-			}
-			
-			i += 2; //skip width line and lda line
-		}else if(!skip.contains(i)){
-			optimized += lines[i];
-		}
-	}
-	return optimized;
-}
-
-array<snes_line> adc_to_inc_optimize(const array<snes_line> &lines)
-{
-	assertf(lines.length() > 4, "length too short"); //I don't think that is even possible with gcc output
-	array<snes_line> optimized;
-	
-	//find adc of 1 2
-	auto adc_comparator = [](const snes_line &line){
-		return line.matches(INSTRUCTION, 1, "adc") && (line.operand(0).matches(CONSTANT, 1) ||
-		line.operand(0).matches(CONSTANT, 2));
-	};
-	
-	int previous = 0;
-	int i = lines.fuzzy_find(0, adc_comparator);
-	while(i != -1){
-		optimized.append(lines.slice(previous, i - 3));
-		previous = i - 3;
-		
-		if(lines[i-3].matches(INSTRUCTION, 1, "lda") && lines[i+1].matches(INSTRUCTION, 1, "sta") &&
-		lines[i-3].operand(0).value == lines[i+1].operand(0).value){
-			optimized += lines[i-3];
-			
-			auto inc = get_instruction("inc");
-			inc.create_operand();
-			inc.operand(0) = lines[i-3].operand(0);
-			
-			optimized += inc;
-			if(lines[i].operand(0).value == 2){
-				optimized += inc;
-			}
-			
-			previous += 7;
-		}
-		i = lines.fuzzy_find(i + 1, adc_comparator);
-	}
-	optimized.append(lines.slice(previous, lines.length()));
-	return optimized;
-}
-
-array<snes_line> redundant_alu_optimize(const array<snes_line> &lines)
-{
-	assertf(lines.length() > 4, "length too short"); //I don't think that is even possible with gcc output
-	auto alu_comparator = [](const snes_line &line){
-		return (line.matches(INSTRUCTION, 1, "adc") ||
-		line.matches(INSTRUCTION, 1, "ora") ||
-		line.matches(INSTRUCTION, 1, "eor") ||
-		line.matches(INSTRUCTION, 1, "and")) &&
-		line.operand(0).type == MEMORY;
-	};
-	
-	
-	auto instruction_comparator = [](const snes_line &line){
-		return line.matches(INSTRUCTION, 1);
-	};
-	
-	array<snes_line> optimized;
-	
-	int previous = 0;
-	int i = lines.fuzzy_find(0, alu_comparator);
-	while(i != -1){
-		bool is_adc = lines[i].mnemonic() == "adc";
-		optimized.append(lines.slice(previous, i - 3 - is_adc));
-		previous = i - 3 - is_adc;
-		const auto &address_1 = lines[i].operand(0);
-		const auto &address_2 = lines[i+1].operand(0);
-		
-		if(lines[i-3-is_adc].matches(INSTRUCTION, 1, "sta") && lines[i+1].matches(INSTRUCTION, 1, "sta") &&
-		lines[i-1].matches(INSTRUCTION, 1, "lda") && lines[i-2].matches(DIRECTIVE, 1, ".width") &&
-		lines[i-3-is_adc].operand(0).matches(address_1.type, address_1.mode, address_1.value) && 
-		lines[i-1].operand(0).matches(address_2.type, address_2.mode, address_2.value)){
-
-			//split this into a function call if load optimization isn't needed
-			int j = find_register_store(i + 2, address_1.value, lines);
-			int k = lines.fuzzy_find(i + 2, j - 1, instruction_comparator);
-			
-			while(k != -1 && address_1.matches(address_2.type, address_2.mode, address_2.value)){
-				//possibly worth doing redundant load optimization here
-				if(lines[k].operand(0).matches(MEMORY, address_1.value)){
-					optimized += lines[i-3-is_adc];
-					break;
-				}
-				k = lines.fuzzy_find(k+1, j-1, instruction_comparator);
-			}
-			
-			if(is_adc){
-				optimized += get_instruction("clc");
-			}
-			
-			optimized += get_memory_instruction(lines[i].mnemonic(), address_2.mode, address_2.value);
-			
-			j = find_register_store(i + 2, address_2.value, lines);
-			k = lines.fuzzy_find(i + 2, j - 1, instruction_comparator);
-
-			while(k != -1){
-				//possibly worth doing redundant load optimization here
-				if(lines[k].operand(0).matches(MEMORY, address_2.value)){
-					optimized += lines[i+1];
-					break;
-				}
-				k = lines.fuzzy_find(k + 1, j - 1, instruction_comparator);
-			}
-			
-			previous += 5 + is_adc;
-		}
-
-		i = lines.fuzzy_find(i + 1, alu_comparator);
-	}
-	optimized.append(lines.slice(previous, lines.length()));
-	return optimized;
-}
-
-array<snes_line> bitshift_optimize(const array<snes_line> &lines)
-{
-	auto shift_comparator = [](const snes_line &line){
-		return (line.matches(INSTRUCTION, 1, "lsr") ||
-		line.matches(INSTRUCTION, 1, "asl")) &&
-		line.operand(0).type == MEMORY;
-	};
-	
-	array<snes_line> optimized;
-	
-	int previous = 0;
-	int i = lines.fuzzy_find(0, shift_comparator);
-	while(i != -1){
-		optimized.append(lines.slice(previous, i - 2));
-		previous = i - 2;
-		auto operand = lines[i].operand(0);
-		
-		if(lines[i-2].matches(INSTRUCTION, 1, "sta") && lines[i-1].matches(DIRECTIVE, 1, ".width") &&
-		lines[i-2].operand(0).matches(operand.type, operand.mode, operand.value)){
-			optimized += get_instruction(lines[i].mnemonic());
-			optimized += lines[i-1]; //keep width instruction
-			optimized += lines[i-2];
-			previous += 3;
-		}
-		
-		i = lines.fuzzy_find(i + 1, shift_comparator);
-	}
-	optimized.append(lines.slice(previous, lines.length()));
-	return optimized;
-}
-
-array<snes_line> optimize(const array<snes_line> &lines)
-{
-	array<snes_line> optimized;
-	
-	optimized = redundant_load_store_optimize(lines);
-	optimized = adc_to_inc_optimize(optimized);
-	optimized = bitshift_optimize(optimized);
-	optimized = redundant_alu_optimize(optimized);
-	return optimized;
-}
-
-
 void dump_parsed_instructions(const array<x86_line> &lines)
 {
 	for(const auto &line : lines){
@@ -860,85 +639,97 @@ void dump_translated_instructions(const array<snes_line> &lines)
 	}	
 }
 
-void output_snes(const array<snes_line> &lines)
+asm_register_width output_snes_line(const snes_line &line, asm_register_width previous_width)
 {
 	bool skip_newline = false;
-	asm_register_width previous_width = BITS_NONE;
-	for(int i; const auto &line : lines){
-		switch(line.type){
-			case INSTRUCTION:
-				print_f("% ", line.mnemonic());
-				for(const auto &operand : line.operands){
-					echo('\t');
-					switch(operand.type){
-						case CONSTANT:
-							if(!operand.label.length()){
-								echo('#');
-							}
-						case MEMORY:
-							if(operand.mode == INDIRECT || operand.mode == INDIRECT_Y){
-								echo("(");
-							}
-							
-							if(operand.label.length()){
-								print_f("%", operand.label);
+	switch(line.type){
+		case INSTRUCTION:
+			print_f("% ", line.mnemonic());
+			for(const auto &operand : line.operands){
+				echo('\t');
+				switch(operand.type){
+					case CONSTANT:
+						if(!operand.label.length()){
+							echo('#');
+						}
+					case MEMORY:
+						if(operand.mode == INDIRECT || operand.mode == INDIRECT_Y){
+							echo("(");
+						}
+						
+						if(operand.label.length()){
+							print_f("%", operand.label);
+						}else{
+							if(operand.width == BITS_24){
+								print_f("${0,6x}", operand.value);
+							}else if((operand.type == CONSTANT && previous_width != BITS_8) 
+							&& operand.width == BITS_16){
+								print_f("${0,4x}", operand.value);
 							}else{
-								if(operand.width == BITS_24){
-									print_f("${0,6x}", operand.value);
-								}else if((operand.type == CONSTANT && previous_width != BITS_8) && operand.width == BITS_16){
-									print_f("${0,4x}", operand.value);
-								}else{
-									print_f("${0,2x}", operand.value);
-								}
-							}
-							if(operand.mode == INDIRECT || operand.mode == INDIRECT_Y){
-								echo(")");
-							}
-							
-							if(operand.mode == INDEXED_X){
-								echo(",x");
-							}else if(operand.mode == INDIRECT_Y){
-								echo(",y");
-							}else if(operand.mode == STACK){
-								echo(",s");
-							}
-						break;
-						default:
-							assertf(0, "bad operand type: %", operand.type);
-					}
-				}
-				break;
-			case LABEL:
-				previous_width = BITS_NONE;
-				print_f("%%", line.label(), isidentstart(line.label()[0]) ? ':' : ' ');
-				break;
-			case DIRECTIVE:
-				if(line.directive() != ".width"){
-					print_f("%", line.directive());
-				}
-				for(const auto &operand : line.operands){
-					if(line.directive() == ".width"){
-						skip_newline = true;
-						if(operand.width == BITS_8 && previous_width != operand.width){
-							print_ln("sep\t#$20");
-						}else if(operand.width == BITS_16 || operand.width == BITS_32){
-							if(previous_width == BITS_8 || previous_width == BITS_NONE){
-								print_ln("rep\t#$20");
+								print_f("${0,2x}", operand.value);
 							}
 						}
-						previous_width = operand.width;
-					}else{
-						print_f(" %", operand.text);
-					}
+						if(operand.mode == INDIRECT || operand.mode == INDIRECT_Y){
+							echo(")");
+						}
+						
+						if(operand.mode == INDEXED_X){
+							echo(",x");
+						}else if(operand.mode == INDIRECT_Y){
+							echo(",y");
+						}else if(operand.mode == STACK){
+							echo(",s");
+						}
+					break;
+					default:
+						assertf(0, "bad operand type: %", operand.type);
 				}
-				break;
-			default:
-				assertf(0, "Bad things");
-		}
-		if(!skip_newline){
-			echo('\n');
-		}
-		skip_newline = false;
+			}
+			break;
+		case LABEL:
+			previous_width = BITS_NONE;
+			print_f("%%", line.label(), isidentstart(line.label()[0]) ? ':' : ' ');
+			break;
+		case DIRECTIVE:
+			if(line.directive() != ".width"){
+				print_f("%", line.directive());
+			}
+			for(const auto &operand : line.operands){
+				if(line.directive() == ".width"){
+					skip_newline = true;
+					if(operand.width == BITS_8 && previous_width != operand.width){
+						print_ln("sep\t#$20");
+					}else if(operand.width == BITS_16 || operand.width == BITS_32){
+						if(previous_width == BITS_8 || previous_width == BITS_NONE){
+							print_ln("rep\t#$20");
+						}else{
+							//print_ln(";width");
+						}
+					}else{
+						//print_ln(";width");
+					}
+					previous_width = operand.width;
+				}else{
+					print_f(" %", operand.text);
+				}
+			}
+			break;
+		default:
+			assertf(0, "Bad things");
+	}
+	if(!skip_newline){
+		echo('\n');
+	}
+	
+	return previous_width;
+}
+
+void output_snes(const array<snes_line> &lines)
+{
+	
+	asm_register_width previous_width = BITS_NONE;
+	for(const auto &line : lines){
+		previous_width = output_snes_line(line, previous_width);
 	}	
 }
 
@@ -972,10 +763,6 @@ int main(int argc, char *argv[])
 	translated_lines = optimize(translated_lines);
 	print_f(";optimization pass translation count: %\n", translated_lines.length());
 	output_snes(translated_lines);
-	
-	auto sta_comp = [](snes_line i){ return i.matches(INSTRUCTION, 1, "sta"); };
-	
-	print(translated_lines.fuzzy_find(tuple(sta_comp, sta_comp)));
 
 	maybe<int> test(1);
 	maybe<int> test1(nothing);

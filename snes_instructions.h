@@ -1,6 +1,7 @@
 #pragma once
 #include "instructions.h"
 
+
 enum snes_address_mode{
 	UNSPECIFIED,
 	DIRECT,
@@ -20,6 +21,11 @@ struct snes_operand{
 	string label;
 	unsigned int value;
 	asm_register_width width = BITS_16; //default 16 bits
+	
+	bool matches(asm_operand_type op_type, snes_address_mode op_mode) const
+	{
+		return op_type == type && op_mode == mode;
+	}
 	
 	bool matches(asm_operand_type op_type, snes_address_mode op_mode, unsigned int op_value) const
 	{

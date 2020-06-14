@@ -3,9 +3,10 @@
 #include <cstddef>
 #include "traits.h"
 #include "algorithms.h"
+#include "maybe.h"
 
 template <typename T>
-class array final : sortable{
+class array final : sortable, container, iterable{
 	public:
 		array() = default;
 		array(const array<T> &other)
@@ -160,35 +161,41 @@ class array final : sortable{
 			return find(0, length_, other) != -1;
 		}
 		
-		int find(int start, int end, const T &other) const
+		maybe<int> find(int start, int end, const T &other) const
 		{
 			return fuzzy_find(start, end, [&other](auto a){
 				return a == other;
 			});
 		}
 		
-		int find(int start, const T &other) const
+		maybe<int> find(int start, const T &other) const
 		{
 			return find(start, length_, other);
 		}
 		
-		int find(const T &other) const
+		maybe<int> find(const T &other) const
 		{
 			return find(0, length_, other);
 		}
 		
 		template <typename F>
-		int fuzzy_find(int start, int end, const F &comparator) const
+		maybe<int> fuzzy_find(int start, int end, const F &comparator) const
 		{
-			int match_count = 0;
 			for(int i = start; i < end; i++){
 				if constexpr(is_tuple_v<F>){
-					visit(comparator, match_count, [this, &match_count, i](auto call){ 
-						match_count = call(data_[i]) ? match_count + 1 : 0;
-					});
-					
+					int match_count = 0;
+					for(int j = 0; j < comparator.size && j + i < end; j++){
+						bool match = false;
+						visit(comparator, j, [this, &match, i, j](auto call){ 
+							match = call(data_[i+j]);
+						});		
+						match_count += match;
+						if(!match){
+							break;
+						}				
+					}
 					if(match_count == comparator.size){
-						return i - match_count + 1;
+						return i;
 					}
 				}else{
 					if(comparator(data_[i])){
@@ -196,19 +203,41 @@ class array final : sortable{
 					}
 				}
 			}
-			return -1;
+			return nothing;
 		}
 		
 		template <typename F>
-		int fuzzy_find(int start, const F &comparator) const
+		maybe<int> fuzzy_find(int start, const F &comparator) const
 		{
 			return fuzzy_find(start, length_, comparator);
 		}
 		
 		template <typename F>
-		int fuzzy_find(const F &comparator) const
+		maybe<int> fuzzy_find(const F &comparator) const
 		{
 			return fuzzy_find(0, length_, comparator);
+		}
+
+		template <typename F>
+		array<int> fuzzy_find_all(int start, int end, const F &comparator) const
+		{
+			array<int> matches;
+			for(auto i = fuzzy_find(start, end, comparator); i; i = fuzzy_find(i + 1, end, comparator)){
+				matches += i;
+			}
+			return matches;
+		}
+		
+		template <typename F>
+		array<int> fuzzy_find_all(int start, const F &comparator) const
+		{
+			return fuzzy_find_all(start, length_, comparator);
+		}		
+		
+		template <typename F>
+		array<int> fuzzy_find_all(const F &comparator) const
+		{
+			return fuzzy_find_all(0, length_, comparator);
 		}
 	
 		T *begin()

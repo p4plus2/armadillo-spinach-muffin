@@ -88,6 +88,7 @@ array<snes_line> build_esp_instruction(string mnemonic, const x86_operand &op)
 		case INDIRECT:
 			assertf(!op.label.length(), "labeled indirect indexed esp not supported");
 			return {get_memory_instruction(mnemonic, STACK, op.offset + 1)};
+		default:;
 	}
 	assertf(0, "unsupported addressing mode");
 	return lines;
@@ -121,6 +122,7 @@ array<snes_line> build_memory_instruction(string mnemonic, const x86_operand &op
 				lines += get_memory_instruction(mnemonic, INDIRECT, register_address(op.base));
 			}
 			return lines;
+		default:;
 	}
 	assertf(0, "unsupported addressing mode");
 	return lines;
@@ -158,6 +160,7 @@ array<snes_line> build_synthetic_memory_instruction(string mnemonic, const x86_o
 				lines += get_memory_instruction("sta", INDIRECT, register_address(op.base));
 			}
 			return lines;
+		default:;
 	}
 	assertf(0, "unsupported addressing mode");
 	return lines;

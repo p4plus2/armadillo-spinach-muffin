@@ -15,13 +15,27 @@ using std::is_floating_point_v;
 using std::is_same_v;
 using std::is_trivially_copyable_v;
 using std::is_base_of_v;
+using std::is_bounded_array_v;
 using std::remove_reference;
+using std::remove_cv;
+using std::decay;
 
 using std::initializer_list;
 
 //a flag to mark a type as sort() compatible.
 //said types should be able to return data() and length()
 class sortable{};
+
+//a flag to mark a type as having standard manipulation
+//said types should be able to use remove, operator[],
+//insert, slice, and append
+class container{};
+
+//a flag to mark a type as having a begin and end
+//which can be incremented in some way to access
+//each element, but order may not be guarenteed
+class iterable{};
+
 
 template <typename T> constexpr 
 typename remove_reference<T>::type&& move(T&& arg)

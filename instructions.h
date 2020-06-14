@@ -5,7 +5,8 @@
 enum asm_line_type{
 	LABEL,
 	DIRECTIVE,
-	INSTRUCTION
+	INSTRUCTION,
+	PLACEHOLDER
 };
 
 enum asm_operand_type{
@@ -70,9 +71,11 @@ struct asm_line{
 	{
 		return operands[n];
 	}
-	void create_operand()
+	
+	T &create_operand()
 	{
 		operands.append(T());
+		return operands[operands.length() - 1];
 	}
 	
 	bool matches(asm_line_type op_type, int op_count, string op_data) const
