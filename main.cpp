@@ -33,7 +33,7 @@ array<char> load_file(const char *file_name)
 	return contents;
 }
 
-array<string> split_lines(array<char> data)
+array<string> split_lines(const array<char> &data)
 {
 	array<string> tokens;
 	string current;
@@ -399,16 +399,13 @@ array<snes_line> translate(const array<x86_line> &lines)
 {
 	array<snes_line> translated_lines;
 	
-	array<snes_line> instruction_lines;
-	
 	for(const auto &line : lines){
 		switch(line.type){
 			case LABEL:
 				translated_lines.append(translate_label(line.label()));
 			break;
 			case INSTRUCTION:
-				instruction_lines = translate_instruction(line);
-				for(const auto &instruction_line : instruction_lines){
+				for(const auto &instruction_line : translate_instruction(line)){
 					translated_lines.append(instruction_line);
 				}
 			break;
@@ -508,7 +505,7 @@ array<int> get_invalid_branches(const array<snes_line> &lines)
 	return invalid_branches;
 }
 
-string negate_branch(string branch)
+string negate_branch(const string &branch)
 {
 	pair<string, string> branch_map[] = {
 		{"beq", "bne"},
@@ -703,10 +700,10 @@ asm_register_width output_snes_line(const snes_line &line, asm_register_width pr
 						if(previous_width == BITS_8 || previous_width == BITS_NONE){
 							print_ln("rep\t#$20");
 						}else{
-							//print_ln(";width");
+							print_ln(";width");
 						}
 					}else{
-						//print_ln(";width");
+						print_ln(";width");
 					}
 					previous_width = operand.width;
 				}else{

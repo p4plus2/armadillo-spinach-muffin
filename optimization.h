@@ -9,6 +9,7 @@ inline struct{
 	bool adc_to_shift = true;
 	bool bitshift = true;
 	bool redundant_bit = true;
+	bool redundant_unary_reload = true;
 }optimizations;
 
 array<snes_line> optimize(const array<snes_line> &lines);

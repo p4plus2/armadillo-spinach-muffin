@@ -70,7 +70,7 @@ array<snes_line> index_memory(const x86_operand &operand)
 	return lines;
 }
 
-array<snes_line> build_esp_instruction(string mnemonic, const x86_operand &op)
+array<snes_line> build_esp_instruction(const string &mnemonic, const x86_operand &op)
 {
 	array<snes_line> lines;
 	switch(get_addressing_mode(op)){
@@ -94,7 +94,7 @@ array<snes_line> build_esp_instruction(string mnemonic, const x86_operand &op)
 	return lines;
 }
 
-array<snes_line> build_memory_instruction(string mnemonic, const x86_operand &op)
+array<snes_line> build_memory_instruction(const string &mnemonic, const x86_operand &op)
 {
 	//hacky esp optimization
 	if(op.base.value == ESP || op.offset == 0x18){
@@ -130,7 +130,7 @@ array<snes_line> build_memory_instruction(string mnemonic, const x86_operand &op
 
 //currently this is meant for shift instructions as the snes supports indirects on most other arithmetics
 //could be used for inc/dec too
-array<snes_line> build_synthetic_memory_instruction(string mnemonic, const x86_operand &op)
+array<snes_line> build_synthetic_memory_instruction(const string &mnemonic, const x86_operand &op)
 {
 	//won't support esp here until I see it necessary
 	array<snes_line> lines;
@@ -166,7 +166,7 @@ array<snes_line> build_synthetic_memory_instruction(string mnemonic, const x86_o
 	return lines;
 }
 
-snes_line build_register_instruction(string mnemonic, const x86_operand &op)
+snes_line build_register_instruction(const string &mnemonic, const x86_operand &op)
 {
 	if(op.reg.value == ESP){
 		if(mnemonic == "sta"){
@@ -413,7 +413,7 @@ array<snes_line> decode_sub(const x86_line &line)
 	return array({get_instruction("sec")}).append(decode_binary_arithmetic("sbc", line));
 }
 
-array<snes_line> decode_shift(string mnemonic, const x86_line &line)
+array<snes_line> decode_shift(const string &mnemonic, const x86_line &line)
 {
 	assert(line.operands.length() == 1 || line.operands.length() == 2);
 	array<snes_line> lines;
@@ -447,7 +447,7 @@ array<snes_line> decode_cmp(const x86_line &line)
 	return cmp_lines.remove(cmp_lines.length());
 }
 
-array<snes_line> decode_inc(const x86_line &line)
+array<snes_line> decode_unary_arithmetic(const string &mnemonic, const x86_line &line)
 {
 	assert(line.operands.length() == 1);
 	assert(line.operand(0).type == REGISTER || line.operand(0).type == MEMORY);
@@ -456,33 +456,24 @@ array<snes_line> decode_inc(const x86_line &line)
 	if(op.type == REGISTER){
 		return {
 			get_register_width(line.mnemonic()),
-			get_memory_instruction("inc", DIRECT, register_address(op.reg))
+			get_memory_instruction(mnemonic, DIRECT, register_address(op.reg))
 		};
 	}else{
 		return {
 			get_register_width(line.mnemonic()),
-			get_memory_instruction("inc", get_addressing_mode(op), op.offset)
+			get_memory_instruction(mnemonic, get_addressing_mode(op), op.offset)
 		};
 	}
 }
 
+array<snes_line> decode_inc(const x86_line &line)
+{
+	return decode_unary_arithmetic("inc", line);
+}
+
 array<snes_line> decode_dec(const x86_line &line)
 {
-	assert(line.operands.length() == 1);
-	assert(line.operand(0).type == REGISTER || line.operand(0).type == MEMORY);
-	auto op = line.operand(0);
-	
-	if(op.type == REGISTER){
-		return {
-			get_register_width(line.mnemonic()),
-			get_memory_instruction("dec", DIRECT, register_address(op.reg))
-		};
-	}else{
-		return {
-			get_register_width(line.mnemonic()),
-			get_memory_instruction("dec", get_addressing_mode(op), op.offset)
-		};
-	}
+	return decode_unary_arithmetic("dec", line);
 }
 
 

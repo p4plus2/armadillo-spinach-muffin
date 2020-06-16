@@ -197,7 +197,7 @@ array<snes_line> redundant_load_store_optimize(const array<snes_line> &lines)
 	};
 	
 	tuple comparators(
-			all_of(get_dp_value, sta, direct), 
+			all_of(sta, memory, direct, get_dp_value), 
 			width, 
 			all_of(lda, memory, direct, value)
 		);
@@ -222,10 +222,8 @@ array<snes_line> redundant_load_store_optimize(const array<snes_line> &lines)
 
 array<snes_line> adc_to_inc_optimize(const array<snes_line> &lines)
 {
-	//this should cover the prefixed increment case specifically
-	//todo look into postfix case
-	assertf(lines.length() > 4, "length too short"); //I don't think that is even possible with gcc output
-
+	//this should cover the postfixed increment case specifically
+	//todo look into prefix case
 	return basic_optimization_iterator(lines,
 		tuple(
 			all_of(lda, memory, get_mode, get_value),
@@ -250,17 +248,36 @@ array<snes_line> adc_to_inc_optimize(const array<snes_line> &lines)
 	);
 }
 
+array<snes_line> redundant_unary_reload_optimize(const array<snes_line> &lines)
+{
+	return basic_optimization_iterator(lines,
+		tuple(
+			all_of(sta, get_value, memory, get_mode), 
+			width, 
+			all_of(bit_shift, memory),
+			width, 
+			all_of(lda, value, memory, mode)
+		),
+		[&lines](int i){
+			return array<snes_line>{
+				lines[i],
+				lines[i + 1],
+				lines[i + 2],
+				lines[i + 3]
+			};
+		}
+	);
+}
+
 array<snes_line> redundant_bit_optimize(const array<snes_line> &lines)
 {
-	assertf(lines.length() > 4, "length too short"); //I don't think that is even possible with gcc output
-	
 	//todo verify codegen never requires the initial store
 	return basic_optimization_iterator(lines,
 		tuple(
-			all_of(get_dp_value, sta, memory, direct), 
+			all_of(sta, memory, direct, get_dp_value), 
 			width, 
-			use_alt_state(all_of(lda, get_value, get_mode, memory)),
-			all_of(bit_logic, value, memory, direct)
+			use_alt_state(all_of(lda, memory, direct, get_value)),
+			all_of(bit_logic, memory, direct, value)
 		),
 		[&lines](int i){
 			return array<snes_line>{
@@ -275,9 +292,9 @@ array<snes_line> bitshift_optimize(const array<snes_line> &lines)
 {	
 	return basic_optimization_iterator(lines,
 		tuple(
-			all_of(get_dp_value, sta, memory, direct), 
+			all_of(sta, memory, direct, get_dp_value), 
 			width, 
-			all_of(bit_shift, value, memory, direct)
+			all_of(bit_shift, memory, direct, value)
 		),
 		[&lines](int i){
 			return array<snes_line>{
@@ -295,9 +312,9 @@ array<snes_line> nonlocal_adc_to_shift_optimize(const array<snes_line> &lines)
 {
 	return basic_optimization_iterator(lines,
 		tuple(
-			all_of(get_dp_value, lda, memory, direct), 
+			all_of(lda, memory, direct, get_dp_value), 
 			clc, 
-			all_of(adc, value, memory, direct)
+			all_of(adc, memory, direct, value)
 		),
 		[&lines](int i){
 			return array<snes_line>{
@@ -312,12 +329,12 @@ array<snes_line> adc_to_shift_optimize(const array<snes_line> &lines)
 {
 	return nonlocal_adc_to_shift_optimize(basic_optimization_iterator(lines,
 		tuple(
-			all_of(get_dp_value, sta, memory, direct), 
+			all_of(sta, get_dp_value, memory, direct), 
 			clc, 
 			width, 
-			all_of(lda, value, memory, direct), 
-			all_of(adc, value, memory, direct), 
-			all_of(sta, value, memory, direct)
+			all_of(lda, memory, direct, value), 
+			all_of(adc, memory, direct, value), 
+			all_of(sta, memory, direct, value)
 		),
 		[&lines](int i){
 			return array<snes_line>{
@@ -338,6 +355,7 @@ array<snes_line> optimize(const array<snes_line> &lines)
 	optimized = optimizations.adc_to_shift ? adc_to_shift_optimize(optimized) : optimized;
 	optimized = optimizations.bitshift ? bitshift_optimize(optimized) : optimized;
 	optimized = optimizations.redundant_bit ? redundant_bit_optimize(optimized) : optimized;
+	optimized = optimizations.redundant_unary_reload ? redundant_unary_reload_optimize(optimized) : optimized;
 	
 	//rerun load store optimize to cleanup some of the new opportunities left by other optimizations
 	optimized = optimizations.redundant_load_store ? redundant_load_store_optimize(optimized) : optimized;
