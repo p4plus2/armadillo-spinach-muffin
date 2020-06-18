@@ -1,179 +1,176 @@
-org    $808000
+org $008000
+incsrc mmio.asm
 
-RESET:
-        SEI
+base $7E1F80
+	stack_end: skip $7F
+	stack:
+base off
 
-        ; Exit emulation mode
-        CLC
-        XCE
-        
-        ; Clear interrupts, DMA, HDMA
-        STZ $4200
-        STZ $420B
-        STZ $420C
-
-        ; Jump to FastROM area. Works because ORG specifies bank $80
-        JML +
-
-+        REP #$20
-
-        ; Set STAck pointer to $00:0FFF
-        LDA #$0FFF
-        TCS
-        
-        ; Set data bank to $80 (FastROM area)
-        PHK
-        PLB
-        
-        ; Set direct page register to $0000
-.zero   PEA $0000
-        PLD
-
-        ; Enable FastROM through hardware register
-        LDX #$01
-        STX $420D
-
-        SEP #$20
-        REP #$10
-
-        ; Clear RAM $7E:0000-$7F:FFFF
-        LDX #$8008
-        STX $4300
-        LDX.w #.zero+1
-        STX $4302
-        LDA.b #.zero+1>>16
-        STA $4304
-        LDX #$0000
-        STX $4305
-        STX $2181
-        STZ $2183
-        LDA #$01
-        STA $420B
-        LDA #$01
-        STA $2183
-        STA $420B
-        SEP #$10
-        
-        ; Initialize every single hardware register ($21xx & $42xx)
-        PHD
-        PEA $2100
-        PLD
-        LDA #$80
-        STA $00
-        STZ $01
-        STZ $02
-        STZ $03
-        STZ $04
-        STZ $05
-        STZ $06
-        STZ $07
-        STZ $08
-        STZ $09
-        STZ $0A
-        STZ $0B
-        STZ $0C
-        STZ $0D
-        STZ $0D
-        STZ $0E
-        STZ $0E
-        STZ $0F
-        STZ $0F
-        STZ $10
-        STZ $10
-        STZ $11
-        STZ $11
-        STZ $12
-        STZ $12
-        STZ $13
-        STZ $13
-        STZ $14
-        STZ $14
-        STZ $15
-        STZ $16
-        STZ $17
-        STZ $18
-        STZ $19
-        STZ $1A
-        STZ $1B
-        STZ $1B
-        STZ $1C
-        STZ $1C
-        STZ $1D
-        STZ $1D
-        STZ $1E
-        STZ $1E
-        STZ $1F
-        STZ $1F
-        STZ $20
-        STZ $20
-        STZ $21
-        STZ $22
-        STZ $22
-        STZ $23
-        STZ $24
-        STZ $25
-        STZ $26
-        STZ $27
-        STZ $28
-        STZ $29
-        STZ $2A
-        STZ $2B
-        STZ $2C
-        STZ $2D
-        STZ $2E
-        STZ $2F
-        STZ $30
-        STZ $31
-        LDA #$80
-        STA $32
-        LDA #$40
-        STA $32
-        LDA #$20
-        STA $32
-        STZ $33
-        STZ $40
-        STZ $41
-        STZ $42
-        STZ $43
-        PEA $4200
-        PLD
-        STZ $01
-        STZ $02
-        STZ $03
-        STZ $04
-        STZ $05
-        STZ $06
-        STZ $07
-        STZ $08
-        STZ $09
-        STZ $0A
-        STZ $0B
-        STZ $0C
-        PLD
-        pea $8080
-        plb
-        plb
-        rep #$30
-        stz $00
-        stz $02
-        stz $04
-        stz $06
-        stz $08
-        stz $0A
-        stz $0C
-        stz $0E
-        stz $10
-        stz $12
-        stz $14
-        stz $16
-        stz $18
-        stz $1A
-        
+reset:
+	sei 	  
+	clc 	  
+	xce 	  
+	stz CPU.enable_interrupts
+	jml +
+	+
+	
+	phk
+	plb
+ 	
+ 	;setup stack/direct page/clear decimal
+ 	rep #$38 
+ 	lda #stack
+ 	tcs 	 
+ 	lda #$0000 
+ 	tcd
+ 	
+ 	jsr register_init
+	jsr clear_RAM
         ;init stack
-        LDA #$0EFF
-        sta $18
-        jsr main
-        stp
+	cli
+	lda #$0EFF
+	sta $18
+	rep #$10
+	jsr main
+	stp
+	
+	
+	
+register_init:  
+ 	sep #$10
+ 	rep #$20
+ 	ldx #$80 		;\ enable force blank
+ 	stx PPU.screen		;/
+ 	stz PPU.sprite_select	; use 16x16 and 8x8 sprites, graphics at vram $0000
+ 	stz PPU.oam_address	; reset oam address
+ 	
+ 	ldx #$01	
+ 	stx PPU.layer_mode			; Mode 1
+ 	stz PPU.mosaic				; disable mosaic
+ 	stz PPU.layer_0_1_tilemap_select	; clear 0/1 map VRAM location
+ 	stz PPU.layer_2_3_tilemap_select	; clear 2/3 map VRAM location
+ 	stz PPU.layer_all_tiledata_select	; clear 0/1/2/3 Tile data location
+ 	
+ 	dex
+ 	stx PPU.layer_0_scroll_x	;\ layer 0 X
+ 	stx PPU.layer_0_scroll_x	;/
+ 	stx PPU.layer_1_scroll_x	;\ layer 1 X
+ 	stx PPU.layer_1_scroll_x	;/
+ 	stx PPU.layer_2_scroll_x	;\ layer 2 X
+ 	stx PPU.layer_2_scroll_x	;/
+ 	stx PPU.layer_3_scroll_x	;\ layer 3 X
+ 	stx PPU.layer_3_scroll_x	;/
+ 	
+ 	ldy #$07			;\ 1 pixel down so you can see the top
+ 	dex				;/
+ 	stx PPU.layer_0_scroll_y	;\ layer 0 Y
+ 	stx PPU.layer_0_scroll_y	;/
+ 	stx PPU.layer_1_scroll_y	;\ layer 1 Y
+ 	stx PPU.layer_1_scroll_y	;/
+ 	stx PPU.layer_2_scroll_y	;\ layer 2 Y
+ 	stx PPU.layer_2_scroll_y	;/
+ 	stx PPU.layer_3_scroll_y	;\ layer 3 Y
+ 	stx PPU.layer_3_scroll_y	;/
+
+ 	stz PPU.window_layer_all_settings	; clear window masks
+ 	stz PPU.window_sprite_color_settings	; clear color masks
+ 	stz PPU.window_1			; Clear window 1 left/right positions
+ 	stz PPU.window_2			; Clear window 2 left/right positions
+ 	stz PPU.window_logic			; Clear windowing logic
+ 	
+ 	lda #$0013 		;\ enable sprites, layer 0, layer 1 on main screen, clear subscreen
+ 	sta PPU.screens		;/
+ 	
+ 	stz PPU.window_masks	; Window mask for Main Screen
+ 	lda #$0030
+ 	sta PPU.color_math	; Disable color math
+ 	
+ 	lda #$00E0	
+ 	sta PPU.display_control	; reset color intensity and clear screen mode
+ 	rts
+
+clear_RAM:
+	jsr clear_wram
+	jsr clear_vram
+	jsr clear_cgram
+	jsr clear_oam
+	rts
+
+clear_wram:
+	stz WRAM.word
+	stz WRAM.high
+	
+	lda #$8008
+	sta DMA[0].settings
+	lda #.fill_byte
+	sta DMA[0].source_word
+	ldx #.fill_byte>>16
+	stx DMA[0].source_bank
+	lda #stack-4	;Clear up to the last 4 bytes of stack
+	sta DMA[0].size
+	ldx #$01
+	stx CPU.enable_dma
+
+	lda #$2000
+	sta WRAM.word
+	stz WRAM.high
+		
+	lda #$E000
+	sta DMA[0].size
+	stx CPU.enable_dma
+	
+	stz DMA[0].size
+	stx CPU.enable_dma
+	
+	rts
+	
+.fill_byte
+	db $00
+
+
+clear_vram:
+	ldx #$80
+	stx PPU.vram_control
+	lda #$1809
+	sta DMA[0].settings
+	stz PPU.vram_address
+	stz DMA[0].source_word
+	stz DMA[0].source_bank
+	stz DMA[0].size  
+	
+	ldx #$01
+	stx CPU.enable_dma
+	rts
+
+clear_cgram:
+	stz PPU.cgram_address
+	ldy #$00
+	ldx #$00
+	-
+		sty PPU.cgram_write
+		sty PPU.cgram_write
+		dex
+	bne -
+	rts
+	
+clear_oam:
+	stz PPU.oam_address
+	ldx #$80
+	ldy #$F0
+	-
+		stz PPU.oam_write
+		sty PPU.oam_write
+		stz PPU.oam_write
+		stz PPU.oam_write
+		dex
+	bne -
+	
+	ldx #$20
+	-
+		stz PPU.oam_write
+		dex
+	bne -
+	rts
 
 incsrc "test_code.asm"
 
@@ -201,46 +198,37 @@ nmi_wrapper:
 irq_wrapper:
 	rti
 
-youscrewedup:
+ah_damn:
 stp
 
-    ; I mostly copypasted this header ROM from an old project of mine
-; I'm not sure if the values are correct or not BUT HEY the rom works
-org $00FFB0
-        db "FF"                ;maker code.
-        db "FFFF"            ;game code.
-        db $00,$00,$00,$00,$00,$00,$00    ;fixed value, must be 0
-        db $00                ;expansion RAM size. SRAM size. 128kB
-        db $00                ;special version, normally 0
-        db $00                ;cartridge sub number, normally 0s
 
-        db "DEMODEMO             "    ;ROM NAME
-        db $30                ;MAP MODE. Mode 30 = fastrom
-        db $02                ;cartridge type. ROM AND RAM AND SRAM
-        db $09                ;3-4 MBit ROM        
-        db $00                ;64K RAM        
-        db $00                ;Destination code: Japan
-        db $33                ;Fixed Value    
-        db $00                ;Mask ROM. This ROM is NOT revised.
-        dw $B50F            ;Complement Check.
-        dw $4AF0            ;Checksum
-
-        ;emulation mode
-        dw $FFFF            ;Unused
-        dw $FFFF            ;Unused
-        dw youscrewedup        ;COP
-        dw youscrewedup        ;BRK
-        dw youscrewedup        ;ABORT
-        dw nmi_wrapper                ;NMI
-        dw $FFFF            ;Unused
-        dw $FFFF                ;IRQ
-
-        ;native mode
-        dw $FFFF            ;Unused
-        dw $FFFF            ;Unused
-        dw youscrewedup        ;COP
-        dw youscrewedup        ;BRK
-        dw youscrewedup        ;ABORT
-        dw $FFFF            ;NMI
-        dw RESET            ;RESET
-        dw $FFFF            ;IRQ
+org $80FFC0
+internal_header:
+	db $20,$20,$20,$20,$20,$20,$20,$20	;\ Blank title since it is unneeded.
+	db $20,$20,$20,$20,$20,$20,$20,$20 	; |
+	db $20,$20,$20,$20,$20			;/
+	db $21 					; Rom type: HiROM
+	db $02					; ROM+SRAM
+	db $0A					; ROM size: 1MB
+	db $03					; RAM size: 8KB
+	db $01					; Country code: NTSC        
+	db $00					; License code: N/A
+	db $00					; Version: zero
+	dw $0000				; Checksum complement. (uncalculated)
+	dw $0000				; Checksum (uncalculated)
+	db $FF,$FF,$FF,$FF			;
+						; Table of interrupt vectors for native mode:
+	dw ah_damn				; COP
+	dw ah_damn				; BRK
+	dw ah_damn				; Abort
+	dw nmi_wrapper				; NMI
+	dw ah_damn				; Unused
+	dw irq_wrapper                		; IRQ
+	db $FF,$FF,$FF,$FF 			; Freespace
+						;
+	dw ah_damn				; COP
+	dw ah_damn				; Unused
+	dw ah_damn				; Abort
+	dw ah_damn				; NMI
+	dw reset				; Reset
+	dw ah_damn				; IRQ or BRK
