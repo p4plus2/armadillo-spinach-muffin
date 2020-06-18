@@ -94,6 +94,20 @@ array<snes_line> build_esp_instruction(const string &mnemonic, const x86_operand
 	return lines;
 }
 
+snes_line get_index_constant(const x86_operand &op)
+{
+	if(op.label.length()){
+		string target = string("#rodata_") + op.label;
+		if(op.offset >= 0){
+			target += "+";
+		}
+		target += to_string(op.offset);	//to_string will include the - when needed
+		return get_memory_instruction("ldy", DIRECT, target);
+	}else{
+		return get_instruction("ldy", INDEX_CONSTANT, op.offset);
+	}
+}
+
 array<snes_line> build_memory_instruction(const string &mnemonic, const x86_operand &op)
 {
 	//hacky esp optimization
@@ -106,17 +120,7 @@ array<snes_line> build_memory_instruction(const string &mnemonic, const x86_oper
 			return {get_memory_instruction(mnemonic, DIRECT, op.offset)};
 		case INDIRECT:
 			if(op.offset || op.label.length()){
-				string target;
-				if(op.label.length()){
-					target = string("#rodata_") + op.label;
-				}
-				if(op.offset){
-					if(!target.length()){	//todo this is a really really nasty hack
-						target = "#";
-					}
-					target += to_string(op.offset);
-				}
-				lines += get_memory_instruction("ldy.w", DIRECT, target);
+				lines += get_index_constant(op);
 				lines += get_memory_instruction(mnemonic, INDIRECT_Y, register_address(op.base));
 			}else{
 				lines += get_memory_instruction(mnemonic, INDIRECT, register_address(op.base));
@@ -143,14 +147,7 @@ array<snes_line> build_synthetic_memory_instruction(const string &mnemonic, cons
 			}
 		case INDIRECT:
 			if(op.offset || op.label.length()){
-				string target;
-				if(op.label.length()){
-					target = string("#rodata_") + op.label;
-				}
-				if(op.offset){
-					target += to_string(op.offset);
-				}
-				lines += get_memory_instruction("ldy", DIRECT, target);
+				lines += get_index_constant(op);
 				lines += get_memory_instruction("lda", INDIRECT_Y, register_address(op.base));
 				lines += get_instruction(mnemonic);
 				lines += get_memory_instruction("sta", INDIRECT_Y, register_address(op.base));

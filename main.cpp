@@ -646,6 +646,7 @@ asm_register_width output_snes_line(const snes_line &line, asm_register_width pr
 				echo('\t');
 				switch(operand.type){
 					case CONSTANT:
+					case INDEX_CONSTANT:
 						if(!operand.label.length()){
 							echo('#');
 						}
@@ -659,8 +660,8 @@ asm_register_width output_snes_line(const snes_line &line, asm_register_width pr
 						}else{
 							if(operand.width == BITS_24){
 								print_f("${0,6x}", operand.value);
-							}else if((operand.type == CONSTANT && previous_width != BITS_8) 
-							&& operand.width == BITS_16){
+							}else if(((operand.type == CONSTANT && previous_width != BITS_8) 
+							&& operand.width == BITS_16) || operand.type == INDEX_CONSTANT){
 								print_f("${0,4x}", operand.value);
 							}else{
 								print_f("${0,2x}", operand.value);
@@ -700,10 +701,10 @@ asm_register_width output_snes_line(const snes_line &line, asm_register_width pr
 						if(previous_width == BITS_8 || previous_width == BITS_NONE){
 							print_ln("rep\t#$20");
 						}else{
-							print_ln(";width");
+							//print_ln(";width");
 						}
 					}else{
-						print_ln(";width");
+						//print_ln(";width");
 					}
 					previous_width = operand.width;
 				}else{

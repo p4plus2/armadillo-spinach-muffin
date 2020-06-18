@@ -9,8 +9,10 @@ enum asm_line_type{
 	PLACEHOLDER
 };
 
+//todo index constant is new and could probably be retroactively applied in a few areas
 enum asm_operand_type{
 	CONSTANT,
+	INDEX_CONSTANT,
 	REGISTER,
 	MEMORY,
 	UNUSED

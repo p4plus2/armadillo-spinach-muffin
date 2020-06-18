@@ -10,6 +10,8 @@ inline struct{
 	bool bitshift = true;
 	bool redundant_bit = true;
 	bool redundant_unary_reload = true;
+	bool delay_load = true;
+	bool redundant_index_constant = true;
 }optimizations;
 
 array<snes_line> optimize(const array<snes_line> &lines);

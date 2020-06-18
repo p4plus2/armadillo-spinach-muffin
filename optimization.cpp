@@ -16,17 +16,18 @@ namespace {
 	
 	const auto get_dp_value = [](const snes_line &line){
 		state.value = line.operands.length() ? line.operand(0).value : 0;
-		return line.operands.length() && line.operand(0).type == MEMORY && state.value < 0x100;
+		return line.operands.length() && state.value < 0x100;
 	};
 	
 	const auto get_value = [](const snes_line &line){
+		state.label = line.operands.length() ? line.operand(0).label : "";
 		state.value = line.operands.length() ? line.operand(0).value : 0;
-		return line.operands.length() && line.operand(0).type == MEMORY;
+		return line.operands.length();
 	};
 	
-	
 	const auto value = [](const snes_line &line){
-		return line.operands.length() && line.operand(0).value == state.value;
+		return line.operands.length() && 
+		line.operand(0).value == state.value && line.operand(0).label == state.label;
 	};
 	
 	const auto use_value = [](unsigned int value, const auto &comparator){
@@ -52,12 +53,25 @@ namespace {
 		return line.operands.length() && line.operand(0).type == CONSTANT;
 	};
 	
+	const auto index_constant = [](const snes_line &line){
+		return line.operands.length() && line.operand(0).type == INDEX_CONSTANT;
+	};
+	
 	const auto direct = [](const snes_line &line){
 		return line.operands.length() && line.operand(0).mode == DIRECT;
 	};
 	
 	const auto indirect = [](const snes_line &line){
 		return line.operands.length() && line.operand(0).mode == INDIRECT;
+	};
+	
+	const auto get_register = [](const snes_line &line){
+		state.value = line.operands.length() ? line.operand(0).value : 0;
+		return line.operands.length() && state.value < 0x20;	//max register address
+	};
+	
+	const auto label = [](const snes_line &line){
+		return line.type == LABEL;
 	};
 	
 	const auto sta = [](const snes_line &line){
@@ -68,8 +82,16 @@ namespace {
 		return line.matches(DIRECTIVE, 1, ".width");
 	};
 	
+	const auto ldy = [](const snes_line &line){
+		return line.matches(INSTRUCTION, 1, "ldy");
+	};
+	
 	const auto lda = [](const snes_line &line){
 		return line.matches(INSTRUCTION, 1, "lda");
+	};
+	
+	const auto tdc = [](const snes_line &line){
+		return line.matches(INSTRUCTION, 0, "tdc");
 	};
 	
 	const auto adc = [](const snes_line &line){
@@ -170,6 +192,11 @@ int find_register_store(int start, unsigned int dp_value, const array<snes_line>
 	return lines.fuzzy_find(start, use_value(dp_value, all_of(sta, memory, direct, value))).get_or(lines.length());
 }
 
+maybe<int> find_register_use(int start, unsigned int dp_value, const array<snes_line> &lines)
+{
+	return lines.fuzzy_find(start, use_value(dp_value, all_of(memory, direct, value)));
+}
+
 template <typename T, typename F>
 array<snes_line> basic_optimization_iterator(const array<snes_line> &lines, const T &comparators, const F &codegen)
 {
@@ -184,40 +211,50 @@ array<snes_line> basic_optimization_iterator(const array<snes_line> &lines, cons
 	return optimized.append(lines.slice(previous, lines.length()));
 }
 
-array<snes_line> redundant_load_store_optimize(const array<snes_line> &lines)
+template <typename T, typename F>
+array<snes_line> eviction_optimization_iterator(const array<snes_line> &lines, const T &comparators, const F &codegen)
 {
 	//this optimization looks for dp and optimizes redundant loads and stores to it, does not handle indirects
 	array<snes_line> optimized;
 	array<int> skips;
 	int previous = 0;
 
-	//possibly add branch skips if this turns out to be a common flaw
-	const auto accumulator_uses = [](const snes_line &line){
-		return passive_instruction(line) && !all_of(lda, memory, direct, value)(line);
-	};
-	
-	tuple comparators(
-			all_of(sta, memory, direct, get_dp_value), 
-			width, 
-			all_of(lda, memory, direct, value)
-		);
-	
 	for(auto i = lines.fuzzy_find(0, comparators); i; i = lines.fuzzy_find(i + 1, comparators)){
 		optimized += blacklist_copy(lines, skips, previous, i);
-		previous = i + 3;
-		int register_store = find_register_store(previous, state.value, lines);
-		
-		auto potential_accumulator_use = lines.fuzzy_find(previous, register_store, accumulator_uses);
-		auto pending_skips = lines.fuzzy_find_all(previous, register_store, all_of(lda, memory, direct, value));
-		
-		if(pending_skips.length() && max(pending_skips) > potential_accumulator_use.get_or(lines.length())){
-			optimized += lines[i];	//store will be needed still
-		}else{
-			skips.append(pending_skips);
-		}
+		previous = i + comparators.size;
+		auto [code, potential_skips] = codegen(i);
+		optimized += code;
+		skips += potential_skips;
 	}
 	optimized += blacklist_copy(lines, skips, previous, lines.length());
 	return optimized;
+}
+
+array<snes_line> redundant_load_store_optimize(const array<snes_line> &lines)
+{
+	//this optimization looks for dp and optimizes redundant loads and stores to it, does not handle indirects
+	//possibly add branch skips if this turns out to be a common flaw
+	const auto accumulator_uses = [](const snes_line &line){
+		return label(line) || (passive_instruction(line) && !all_of(lda, memory, direct, value)(line));
+	};
+	return eviction_optimization_iterator(lines,
+		tuple(
+			all_of(sta, memory, direct, get_dp_value), 
+			width, 
+			all_of(lda, memory, direct, value)
+		),
+		[&lines, &accumulator_uses](int i){
+			int register_store = find_register_store(i + 3, state.value, lines);
+			auto potential_accumulator_use = lines.fuzzy_find(i + 3, register_store, accumulator_uses);
+			auto skips = lines.fuzzy_find_all(i + 3, register_store, all_of(lda, memory, direct, value));
+			
+			if(skips.length() && max(skips) > potential_accumulator_use.get_or(lines.length())){
+				return pair(array<snes_line>({lines[i]}), array<int>());
+			}else{
+				return pair(array<snes_line>(), skips);
+			}
+		}
+	);
 }
 
 array<snes_line> adc_to_inc_optimize(const array<snes_line> &lines)
@@ -346,6 +383,94 @@ array<snes_line> adc_to_shift_optimize(const array<snes_line> &lines)
 	));
 }
 
+array<snes_line> delay_load_optimize(const array<snes_line> &lines)
+{
+	//this optimization looks for addresses which are loaded then stored then tries to delay
+	//the load until the first time the result is used.  This optimization will only trigger
+	//when the width of both the original load and the replacement match to avoid rep/sep
+	//overhead
+	array<snes_line> optimized;
+	array<pair<int, int>> replacements;
+	int previous = 0;
+
+	tuple comparators(
+			width,
+			all_of(lda),
+			all_of(sta, get_register)
+		);
+		
+	const auto replacement_slice = [&](int offset, int bound){
+		for(const auto &[i, replacement] : replacements){
+			if(i < offset){
+				continue;
+			}else if(i < bound){
+				optimized.append(lines.slice(offset, i));
+				optimized += lines[replacement];
+				optimized += lines[replacement + 1];
+				optimized += lines[replacement + 2];
+				optimized += lines[i - 1];
+				offset = i + 1;				
+			}
+		}
+		optimized.append(lines.slice(offset, bound));
+	};
+	
+	for(auto i = lines.fuzzy_find(0, comparators); i; i = lines.fuzzy_find(i + 1, comparators)){
+		replacement_slice(previous, i);
+		previous = i + 3;
+		
+		bool delay_load = false;
+		auto register_use = find_register_use(previous, state.value, lines);
+		if(register_use && lda(lines[register_use]) && width(lines[register_use - 1]) &&
+		lines[register_use - 1].operand(0).width == lines[i].operand(0).width){
+			delay_load = true;
+			for(int j = previous; j < register_use; j++){
+				if(label(lines[j])){
+					delay_load = false;
+					break;
+				}
+			}
+		}
+		
+		if(lines.fuzzy_find(previous, passive_instruction) < lines.fuzzy_find(previous, one_of(lda, tdc))){
+			delay_load = false;
+		}
+		
+		if(delay_load){
+			replacements.append({register_use, i});
+		}else{
+			previous -= 3;
+		}
+	}
+	replacement_slice(previous, lines.length());
+	return optimized;
+}
+
+array<snes_line> redundant_index_constant_optimize(const array<snes_line> &lines)
+{
+	return eviction_optimization_iterator(lines,
+		tuple(
+			all_of(ldy, index_constant, get_value)
+		),
+		[&lines](int i){
+			array<int> removable_ldy;
+			for(int j = i + 1; j < lines.length(); j++){
+				if(all_of(ldy, index_constant, value)(lines[j])){
+					removable_ldy += j;
+				}else if(ldy(lines[j]) || label(lines[j])){
+					break;
+				}
+			}
+			if(removable_ldy.length()){
+				return pair(array<snes_line>({lines[i]}), removable_ldy);
+			}else{
+				return pair(array<snes_line>(), removable_ldy);
+			}
+		}
+	);
+}
+
+
 array<snes_line> optimize(const array<snes_line> &lines)
 {
 	array<snes_line> optimized;
@@ -356,8 +481,12 @@ array<snes_line> optimize(const array<snes_line> &lines)
 	optimized = optimizations.bitshift ? bitshift_optimize(optimized) : optimized;
 	optimized = optimizations.redundant_bit ? redundant_bit_optimize(optimized) : optimized;
 	optimized = optimizations.redundant_unary_reload ? redundant_unary_reload_optimize(optimized) : optimized;
+	optimized = optimizations.delay_load ? delay_load_optimize(optimized) : optimized;
+	optimized = optimizations.redundant_index_constant ? redundant_index_constant_optimize(optimized) : optimized;
 	
 	//rerun load store optimize to cleanup some of the new opportunities left by other optimizations
 	optimized = optimizations.redundant_load_store ? redundant_load_store_optimize(optimized) : optimized;
 	return optimized;
 }
+
+

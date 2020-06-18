@@ -15,6 +15,8 @@ template <typename T1, typename T2>
 struct pair{
 	T1 first;
 	T2 second;
+	pair() = default;
+	pair(T1 a, T2 b) : first(a), second(b){}
 };
 
 //swaps two variables, upon going out of scope they are swapped back

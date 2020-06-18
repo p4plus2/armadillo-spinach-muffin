@@ -35,6 +35,7 @@ snes_line get_instruction(const string &instruction, asm_operand_type type, T va
 	return line;
 }
 
+template snes_line get_instruction<int>(const string &instruction, asm_operand_type type, int value);
 template snes_line get_instruction<unsigned int>(const string &instruction, asm_operand_type type, unsigned int value);
 template snes_line get_instruction<string>(const string &instruction, asm_operand_type type, string value);
 
